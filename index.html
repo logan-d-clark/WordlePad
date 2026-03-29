@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#121213">
+<title>Wordle Pad</title>
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='16' fill='%23121213'/><text x='50' y='62' text-anchor='middle' font-size='48' font-family='monospace' font-weight='bold' fill='%23538d4e'>W</text></svg>">
+<link rel="apple-touch-icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='16' fill='%23121213'/><text x='50' y='62' text-anchor='middle' font-size='48' font-family='monospace' font-weight='bold' fill='%23538d4e'>W</text></svg>">
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+  body {
+    font-family: 'SF Mono', 'Fira Code', 'JetBrains Mono', 'Cascadia Code', monospace;
+    background: #121213;
+    color: #e5e5e5;
+    min-height: 100vh;
+    min-height: 100dvh;
+    overflow-x: hidden;
+  }
+  #app { padding: 16px 16px 100px; max-width: 400px; margin: 0 auto; }
+
+  .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
+  .header h1 { font-size: 18px; font-weight: 700; letter-spacing: 4px; text-transform: uppercase; }
+  .btn-reset {
+    background: transparent; border: 1px solid #3a3a3c; color: #818384;
+    font-size: 11px; font-family: inherit; padding: 6px 12px; border-radius: 6px;
+    cursor: pointer; text-transform: uppercase; letter-spacing: 1px;
+  }
+
+  .section-label { font-size: 10px; text-transform: uppercase; letter-spacing: 2px; margin: 0 0 8px; }
+  .label-green { color: #538d4e; }
+  .label-yellow { color: #b59f3b; }
+
+  .word-row { display: flex; gap: 6px; }
+  .cell {
+    width: 52px; height: 56px; border-radius: 6px;
+    display: flex; align-items: center; justify-content: center;
+    transition: all 0.15s ease; position: relative;
+  }
+  .cell-input {
+    width: 100%; height: 100%; background: transparent; border: none;
+    color: #fff; font-size: 24px; font-family: inherit; font-weight: 700;
+    text-align: center; outline: none; caret-color: #538d4e; text-transform: uppercase;
+  }
+  .cell-empty { border: 2px solid #3a3a3c; background: #121213; }
+  .cell-filled { border: 2px solid #538d4e; background: rgba(83,141,78,0.13); }
+
+  .divider { height: 1px; background: #2a2a2b; margin: 16px 0 12px; }
+
+  .yellow-row { display: flex; align-items: center; gap: 8px; padding: 6px 0; }
+  .yellow-cell {
+    width: 52px; height: 56px; border-radius: 6px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 22px; font-weight: 700; cursor: pointer; user-select: none;
+    transition: all 0.15s ease;
+  }
+  .yellow-on { background: rgba(181,159,59,0.2); border: 2px solid #b59f3b; color: #b59f3b; }
+  .yellow-off { background: #121213; border: 2px solid #3a3a3c; color: rgba(58,58,60,0.33); }
+
+  .btn-delete {
+    width: 36px; height: 36px; border-radius: 50%; border: 1px solid #3a3a3c;
+    background: transparent; color: #6b6b6e; font-size: 18px;
+    display: flex; align-items: center; justify-content: center;
+    cursor: pointer; margin-left: 4px; flex-shrink: 0;
+  }
+
+  .btn-add {
+    width: 100%; padding: 14px 0; margin-top: 12px;
+    background: #2a2a2b; border: 2px dashed #3a3a3c; border-radius: 8px;
+    color: #818384; font-size: 13px; font-family: inherit;
+    cursor: pointer; letter-spacing: 1px;
+  }
+
+  /* Modal */
+  .modal-overlay {
+    position: fixed; inset: 0; background: rgba(0,0,0,0.7);
+    display: flex; align-items: flex-end; justify-content: center;
+    z-index: 100; backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px);
+  }
+  .modal-sheet {
+    background: #1a1a1b; border-radius: 16px 16px 0 0;
+    padding: 20px 16px 32px; width: 100%; max-width: 400px;
+  }
+  .modal-handle { width: 40px; height: 4px; border-radius: 2px; background: #3a3a3c; margin: 0 auto 16px; }
+  .modal-title { color: #818384; font-size: 13px; text-align: center; margin: 0 0 14px; text-transform: uppercase; letter-spacing: 2px; }
+  .letter-grid { display: flex; flex-wrap: wrap; gap: 6px; justify-content: center; }
+  .letter-btn {
+    width: 40px; height: 44px; border-radius: 6px; border: none;
+    font-size: 16px; font-family: inherit; font-weight: 600; cursor: pointer;
+    transition: all 0.1s ease;
+  }
+  .letter-available { background: #2a2a2b; color: #e5e5e5; }
+  .letter-used { background: #1a1a1b; color: #3a3a3c; cursor: default; }
+</style>
+</head>
+<body>
+<div id="app"></div>
+<script>
+(function() {
+  // --- State ---
+  let word = ['','','','',''];
+  let rows = []; // { id, letter, active: [bool x5] }
+  let showModal = false;
+
+  function render() {
+    const app = document.getElementById('app');
+    const usedLetters = rows.map(r => r.letter);
+
+    app.innerHTML = `
+      <div class="header">
+        <h1>Wordle Pad</h1>
+        <button class="btn-reset" onclick="WP.reset()">Reset</button>
+      </div>
+
+      <div style="margin-bottom:8px">
+        <p class="section-label label-green">Confirmed</p>
+        <div class="word-row" id="word-row">
+          ${word.map((l,i) => `
+            <div class="cell ${l ? 'cell-filled' : 'cell-empty'}">
+              <input class="cell-input" type="text" maxlength="1" value="${l}"
+                data-idx="${i}"
+                oninput="WP.setLetter(${i}, this)"
+                onkeydown="WP.cellKey(event, ${i})"
+                enterkeyhint="next"
+                autocomplete="off" autocapitalize="characters" autocorrect="off" spellcheck="false">
+            </div>
+          `).join('')}
+        </div>
+      </div>
+
+      <div class="divider"></div>
+
+      ${rows.length ? '<p class="section-label label-yellow">Possible positions</p>' : ''}
+
+      ${rows.map(row => `
+        <div class="yellow-row">
+          <div style="display:flex;gap:6px">
+            ${row.active.map((on, i) => `
+              <div class="yellow-cell ${on ? 'yellow-on' : 'yellow-off'}"
+                onclick="WP.toggle('${row.id}',${i})">${row.letter}</div>
+            `).join('')}
+          </div>
+          <button class="btn-delete" onclick="WP.deleteRow('${row.id}')" aria-label="Delete ${row.letter} row">&times;</button>
+        </div>
+      `).join('')}
+
+      <button class="btn-add" onclick="WP.openModal()">+ Add Yellow Letter</button>
+
+      ${showModal ? `
+        <div class="modal-overlay" onclick="WP.closeModal()">
+          <div class="modal-sheet" onclick="event.stopPropagation()">
+            <div class="modal-handle"></div>
+            <p class="modal-title">Pick a yellow letter</p>
+            <div class="letter-grid">
+              ${'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('').map(l => {
+                const used = usedLetters.includes(l);
+                return `<button class="letter-btn ${used ? 'letter-used' : 'letter-available'}"
+                  ${used ? 'disabled' : `onclick="WP.addRow('${l}')"`}>${l}</button>`;
+              }).join('')}
+            </div>
+          </div>
+        </div>
+      ` : ''}
+    `;
+  }
+
+  // --- Actions exposed globally ---
+  window.WP = {
+    setLetter(i, el) {
+      const v = el.value.toUpperCase().replace(/[^A-Z]/g, '');
+      el.value = v;
+      word[i] = v;
+      if (v) {
+        const inputs = document.querySelectorAll('#word-row input');
+        if (i < 4) inputs[i+1].focus();
+      }
+      render();
+      // re-focus after render
+      if (v && i < 4) {
+        const inputs = document.querySelectorAll('#word-row input');
+        inputs[i+1].focus();
+      }
+    },
+    cellKey(e, i) {
+      if (e.key === 'Backspace' && !word[i] && i > 0) {
+        word[i-1] = '';
+        render();
+        const inputs = document.querySelectorAll('#word-row input');
+        inputs[i-1].focus();
+      }
+    },
+    toggle(id, pos) {
+      const row = rows.find(r => r.id === id);
+      if (row) { row.active[pos] = !row.active[pos]; render(); }
+    },
+    deleteRow(id) {
+      rows = rows.filter(r => r.id !== id);
+      render();
+    },
+    addRow(letter) {
+      rows.push({ id: 'r' + Date.now(), letter, active: [true,true,true,true,true] });
+      showModal = false;
+      render();
+    },
+    openModal() { showModal = true; render(); },
+    closeModal() { showModal = false; render(); },
+    reset() { word = ['','','','','']; rows = []; showModal = false; render(); },
+  };
+
+  render();
+})();
+</script>
+</body>
+</html>
