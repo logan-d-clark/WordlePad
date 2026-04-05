@@ -9,7 +9,7 @@
 <title>Wordle Pad</title>
 <link rel="manifest" href="/WordlePad/manifest.json">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='16' fill='%23121213'/><text x='50' y='62' text-anchor='middle' font-size='48' font-family='monospace' font-weight='bold' fill='%23538d4e'>W</text></svg>">
-<link rel="apple-touch-icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='16' fill='%23121213'/><text x='50' y='62' text-anchor='middle' font-size='48' font-family='monospace' font-weight='bold' fill='%23538d4e'>W</text></svg>">
+<link rel="apple-touch-icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2020/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='16' fill='%23121213'/><text x='50' y='62' text-anchor='middle' font-size='48' font-family='monospace' font-weight='bold' fill='%23538d4e'>W</text></svg>">
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
   body {
@@ -33,6 +33,7 @@
   .section-label { font-size: 10px; text-transform: uppercase; letter-spacing: 2px; margin: 0 0 8px; }
   .label-green { color: #538d4e; }
   .label-yellow { color: #b59f3b; }
+  .label-blue { color: #85c0f9; }
 
   .word-row { display: flex; gap: 6px; }
   .cell {
@@ -95,21 +96,22 @@
   .letter-available { background: #2a2a2b; color: #e5e5e5; }
   .letter-used { background: #1a1a1b; color: #3a3a3c; cursor: default; }
 
-  .label-blue { color: #85c0f9; }
-  .guess-row { display: flex; align-items: center; gap: 8px; padding: 6px 0; }
-  .guess-cell { border: 2px solid #3a3a3c; background: #121213; }
-  .guess-cell-filled { border: 2px solid #85c0f9; background: rgba(133,192,249,0.1); }
-  .guess-input {
-    width: 100%; height: 100%; background: transparent; border: none;
-    color: #85c0f9; font-size: 24px; font-family: inherit; font-weight: 700;
-    text-align: center; outline: none; caret-color: #85c0f9; text-transform: uppercase;
+  /* Candidates */
+  .candidates-header {
+    display: flex; align-items: center; justify-content: space-between;
+    cursor: pointer; user-select: none; padding: 4px 0;
   }
-  .btn-add-guess {
-    width: 100%; padding: 14px 0; margin-top: 8px;
-    background: #2a2a2b; border: 2px dashed #3a3a3c; border-radius: 8px;
-    color: #818384; font-size: 13px; font-family: inherit;
-    cursor: pointer; letter-spacing: 1px;
+  .candidates-toggle { color: #85c0f9; font-size: 12px; }
+  .candidate-row { display: flex; gap: 6px; padding: 4px 0; }
+  .cand-cell {
+    width: 52px; height: 56px; border-radius: 6px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 24px; font-weight: 700;
   }
+  .cand-confirmed { border: 2px solid #538d4e; background: rgba(83,141,78,0.13); color: #fff; }
+  .cand-yellow { border: 2px solid #b59f3b; background: rgba(181,159,59,0.2); color: #b59f3b; }
+  .cand-blank { border: 2px solid #2a2a2b; background: #121213; color: #3a3a3c; }
+  .candidates-empty { color: #3a3a3c; font-size: 12px; padding: 8px 0; }
 </style>
 </head>
 <body>
@@ -119,12 +121,54 @@
   // --- State ---
   let word = ['','','','',''];
   let rows = []; // { id, letter, active: [bool x5] }
-  let guesses = []; // { id, letters: [str x5] }
+  let candidatesOpen = false;
   let showModal = false;
+
+  // --- Candidate generation ---
+  function generateCandidates() {
+    if (rows.length === 0) return [];
+
+    // For each yellow row, find positions that are active AND not occupied by a confirmed letter
+    const yellows = rows.map(row => ({
+      letter: row.letter,
+      positions: row.active.map((on, i) => (on && !word[i]) ? i : -1).filter(i => i !== -1)
+    }));
+
+    // If any yellow letter has no valid positions, no candidates are possible
+    if (yellows.some(y => y.positions.length === 0)) return [];
+
+    const results = [];
+
+    function backtrack(idx, assignment) {
+      if (idx === yellows.length) {
+        // Build candidate as array of {letter, type}
+        const cells = word.map((l, i) =>
+          l ? { letter: l, type: 'confirmed' } : { letter: '', type: 'blank' }
+        );
+        for (const [posStr, letter] of Object.entries(assignment)) {
+          cells[+posStr] = { letter, type: 'yellow' };
+        }
+        results.push(cells);
+        return;
+      }
+      const { letter, positions } = yellows[idx];
+      for (const pos of positions) {
+        if (!(pos in assignment)) {
+          assignment[pos] = letter;
+          backtrack(idx + 1, assignment);
+          delete assignment[pos];
+        }
+      }
+    }
+
+    backtrack(0, {});
+    return results;
+  }
 
   function render() {
     const app = document.getElementById('app');
     const usedLetters = rows.map(r => r.letter);
+    const candidates = generateCandidates();
 
     app.innerHTML = `
       <div class="header">
@@ -166,28 +210,27 @@
 
       <button class="btn-add" onclick="WP.openModal()">+ Add Yellow Letter</button>
 
-      <div class="divider"></div>
-
-      ${guesses.length ? '<p class="section-label label-blue">Candidates</p>' : ''}
-
-      ${guesses.map((g, gi) => `
-        <div class="guess-row">
-          <div class="word-row" data-guess-row="${g.id}">
-            ${g.letters.map((l, i) => `
-              <div class="cell ${l ? 'guess-cell-filled' : 'guess-cell'}">
-                <input class="guess-input" type="text" maxlength="1" value="${l}"
-                  oninput="WP.setGuessLetter('${g.id}', ${i}, this)"
-                  onkeydown="WP.guessKey(event, '${g.id}', ${i})"
-                  enterkeyhint="next"
-                  autocomplete="off" autocapitalize="characters" autocorrect="off" spellcheck="false">
-              </div>
-            `).join('')}
-          </div>
-          <button class="btn-delete" onclick="WP.deleteGuess('${g.id}')" aria-label="Delete guess row">&times;</button>
+      ${rows.length ? `
+        <div class="divider"></div>
+        <div class="candidates-header" onclick="WP.toggleCandidates()">
+          <span class="section-label label-blue" style="margin:0">Candidates (${candidates.length})</span>
+          <span class="candidates-toggle">${candidatesOpen ? '▲ hide' : '▼ show'}</span>
         </div>
-      `).join('')}
-
-      <button class="btn-add-guess" onclick="WP.addGuess()">+ Add Candidate</button>
+        ${candidatesOpen ? `
+          <div style="margin-top:10px">
+            ${candidates.length === 0
+              ? '<p class="candidates-empty">No valid placements with current selections.</p>'
+              : candidates.map(cells => `
+                  <div class="candidate-row">
+                    ${cells.map(c => `
+                      <div class="cand-cell cand-${c.type}">${c.letter || '_'}</div>
+                    `).join('')}
+                  </div>
+                `).join('')
+            }
+          </div>
+        ` : ''}
+      ` : ''}
 
       ${showModal ? `
         <div class="modal-overlay" onclick="WP.closeModal()">
@@ -218,7 +261,6 @@
         if (i < 4) inputs[i+1].focus();
       }
       render();
-      // re-focus after render
       if (v && i < 4) {
         const inputs = document.querySelectorAll('#word-row input');
         inputs[i+1].focus();
@@ -245,41 +287,10 @@
       showModal = false;
       render();
     },
+    toggleCandidates() { candidatesOpen = !candidatesOpen; render(); },
     openModal() { showModal = true; render(); },
     closeModal() { showModal = false; render(); },
-    reset() { word = ['','','','','']; rows = []; guesses = []; showModal = false; render(); },
-    addGuess() {
-      // Pre-fill with confirmed letters from the top row
-      const prefill = word.map(l => l || '');
-      guesses.push({ id: 'g' + Date.now(), letters: prefill });
-      render();
-    },
-    setGuessLetter(id, i, el) {
-      const v = el.value.toUpperCase().replace(/[^A-Z]/g, '');
-      el.value = v;
-      const g = guesses.find(r => r.id === id);
-      if (g) { g.letters[i] = v; }
-      if (v) {
-        render();
-        const row = document.querySelector(`[data-guess-row="${id}"]`);
-        if (row && i < 4) row.querySelectorAll('input')[i+1].focus();
-      } else {
-        render();
-      }
-    },
-    guessKey(e, id, i) {
-      const g = guesses.find(r => r.id === id);
-      if (e.key === 'Backspace' && g && !g.letters[i] && i > 0) {
-        g.letters[i-1] = '';
-        render();
-        const row = document.querySelector(`[data-guess-row="${id}"]`);
-        if (row) row.querySelectorAll('input')[i-1].focus();
-      }
-    },
-    deleteGuess(id) {
-      guesses = guesses.filter(r => r.id !== id);
-      render();
-    },
+    reset() { word = ['','','','','']; rows = []; candidatesOpen = false; showModal = false; render(); },
   };
 
   render();
