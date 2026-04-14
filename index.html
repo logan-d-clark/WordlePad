@@ -34,6 +34,7 @@
   .label-green { color: #538d4e; }
   .label-yellow { color: #b59f3b; }
   .label-blue { color: #85c0f9; }
+  .label-grey { color: #818384; }
 
   .word-row { display: flex; gap: 6px; }
   .cell {
@@ -75,6 +76,14 @@
     cursor: pointer; letter-spacing: 1px;
   }
 
+  /* Grey letters */
+  .grey-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; }
+  .grey-chip {
+    padding: 5px 10px; border-radius: 6px; font-size: 14px; font-weight: 700;
+    background: rgba(129,131,132,0.15); border: 2px solid #818384; color: #818384;
+    cursor: pointer; user-select: none; text-transform: uppercase; letter-spacing: 1px;
+  }
+
   /* Modal */
   .modal-overlay {
     position: fixed; inset: 0; background: rgba(0,0,0,0.7);
@@ -95,8 +104,10 @@
   }
   .letter-available { background: #2a2a2b; color: #e5e5e5; }
   .letter-used { background: #1a1a1b; color: #3a3a3c; cursor: default; }
+  .letter-grey-on { background: rgba(129,131,132,0.2); border: 2px solid #818384 !important; color: #818384; }
+  .letter-grey-off { background: #2a2a2b; color: #e5e5e5; border: 2px solid transparent; }
 
-  /* Candidates */
+  /* Candidates / Possible Letter Layouts */
   .candidates-header {
     display: flex; align-items: center; justify-content: space-between;
     cursor: pointer; user-select: none; padding: 4px 0;
@@ -112,6 +123,32 @@
   .cand-yellow { border: 2px solid #b59f3b; background: rgba(181,159,59,0.2); color: #b59f3b; }
   .cand-blank { border: 2px solid #2a2a2b; background: #121213; color: #3a3a3c; }
   .candidates-empty { color: #3a3a3c; font-size: 12px; padding: 8px 0; }
+
+  /* Remaining Solutions */
+  .remaining-header {
+    display: flex; align-items: center; gap: 8px;
+    cursor: pointer; user-select: none; padding: 4px 0;
+  }
+  .remaining-label { font-size: 10px; text-transform: uppercase; letter-spacing: 2px; color: #538d4e; flex: 1; }
+  .remaining-badge {
+    display: inline-flex; align-items: center; justify-content: center;
+    background: #2a2a2b; border-radius: 10px; padding: 2px 8px;
+    font-size: 11px; min-width: 32px; color: #e5e5e5;
+  }
+  .remaining-toggle { color: #85c0f9; font-size: 12px; }
+
+  @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+  .spinner { display: inline-block; animation: spin 1s linear infinite; }
+
+  .word-list { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+  .word-chip {
+    padding: 4px 8px; border-radius: 4px; font-size: 12px; font-weight: 700;
+    background: #2a2a2b; color: #818384; text-transform: uppercase; letter-spacing: 1px;
+  }
+  .word-chip-solution {
+    background: rgba(83,141,78,0.12); color: #538d4e; border: 1px solid rgba(83,141,78,0.4);
+  }
+  .word-chip-solution::before { content: '★ '; font-size: 10px; }
 </style>
 </head>
 <body>
@@ -123,6 +160,87 @@
   let rows = []; // { id, letter, active: [bool x5] }
   let candidatesOpen = false;
   let showModal = false;
+
+  // Grey letters & remaining solutions state
+  let greyLetters = new Set(); // uppercase letters
+  let showGreyModal = false;
+  let wordsReady = false;
+  let remainingWords = null; // null = not yet computed, array = computed
+  let remainingLoading = false;
+  let remainingOpen = false;
+  let debounceTimer = null;
+
+  // --- Word filtering ---
+  function scheduleFilter() {
+    if (!wordsReady) return;
+    remainingLoading = true;
+    clearTimeout(debounceTimer);
+    debounceTimer = setTimeout(() => {
+      remainingWords = computeRemaining();
+      remainingLoading = false;
+      render();
+    }, 1000);
+    render(); // show loading badge immediately
+  }
+
+  function computeRemaining() {
+    const solutions = window.WORDLE_SOLUTIONS || [];
+    const allowed = window.WORDLE_ALLOWED || [];
+    const solutionSet = new Set(solutions);
+    const all = [...solutions, ...allowed];
+
+    // Count how many times each letter is confirmed (green positions + yellow rows).
+    // When a letter is also grey, this tells us the exact count of that letter in the word.
+    const confirmedCounts = {};
+    for (let i = 0; i < 5; i++) {
+      if (word[i]) {
+        const l = word[i].toLowerCase();
+        confirmedCounts[l] = (confirmedCounts[l] || 0) + 1;
+      }
+    }
+    for (const row of rows) {
+      const l = row.letter.toLowerCase();
+      confirmedCounts[l] = (confirmedCounts[l] || 0) + 1;
+    }
+
+    const filtered = all.filter(w => {
+      // Green: letter must be at exact position
+      for (let i = 0; i < 5; i++) {
+        if (word[i] && w[i] !== word[i].toLowerCase()) return false;
+      }
+      // Yellow: letter must be in word and not at any deactivated position
+      for (const row of rows) {
+        const letter = row.letter.toLowerCase();
+        if (!w.includes(letter)) return false;
+        for (let i = 0; i < 5; i++) {
+          if (!row.active[i] && w[i] === letter) return false;
+        }
+      }
+      // Grey constraints — two cases:
+      // 1. Letter has no confirmed occurrences → must not appear in word at all
+      // 2. Letter also appears green/yellow → grey means "no additional copies",
+      //    so word must contain it exactly `confirmedCounts` times
+      for (const letter of greyLetters) {
+        const l = letter.toLowerCase();
+        const confirmed = confirmedCounts[l] || 0;
+        if (confirmed === 0) {
+          if (w.includes(l)) return false;
+        } else {
+          const count = w.split('').filter(c => c === l).length;
+          if (count !== confirmed) return false;
+        }
+      }
+      return true;
+    });
+
+    // Solutions first (alphabetical), then allowed-only (alphabetical)
+    return filtered.sort((a, b) => {
+      const aS = solutionSet.has(a);
+      const bS = solutionSet.has(b);
+      if (aS !== bS) return aS ? -1 : 1;
+      return a.localeCompare(b);
+    });
+  }
 
   // --- Candidate generation ---
   function generateCandidates() {
@@ -169,6 +287,19 @@
     const app = document.getElementById('app');
     const usedLetters = rows.map(r => r.letter);
     const candidates = generateCandidates();
+    const solutionSet = new Set(window.WORDLE_SOLUTIONS || []);
+
+    // Remaining Solutions badge content
+    let badgeContent;
+    if (!wordsReady) {
+      badgeContent = '<span style="color:#818384;font-size:10px;letter-spacing:0">loading...</span>';
+    } else if (remainingLoading) {
+      badgeContent = '<span class="spinner" style="color:#818384">⟳</span>';
+    } else if (remainingWords !== null) {
+      badgeContent = remainingWords.length;
+    } else {
+      badgeContent = '–';
+    }
 
     app.innerHTML = `
       <div class="header">
@@ -210,10 +341,21 @@
 
       <button class="btn-add" onclick="WP.openModal()">+ Add Yellow Letter</button>
 
+      ${greyLetters.size > 0 ? `
+        <div class="grey-chips">
+          ${[...greyLetters].sort().map(l => `
+            <div class="grey-chip" onclick="WP.toggleGrey('${l}')" title="Remove ${l}">${l} &times;</div>
+          `).join('')}
+        </div>
+      ` : ''}
+      <button class="btn-add" style="border-color:${greyLetters.size > 0 ? '#818384' : '#3a3a3c'};color:${greyLetters.size > 0 ? '#818384' : '#818384'}" onclick="WP.openGreyModal()">
+        ${greyLetters.size > 0 ? `&#9632; Edit Grey Letters (${greyLetters.size})` : '+ Add Grey Letter'}
+      </button>
+
       ${rows.length ? `
         <div class="divider"></div>
         <div class="candidates-header" onclick="WP.toggleCandidates()">
-          <span class="section-label label-blue" style="margin:0">Candidates (${candidates.length})</span>
+          <span class="section-label label-blue" style="margin:0">Possible Letter Layouts (${candidates.length})</span>
           <span class="candidates-toggle">${candidatesOpen ? '▲ hide' : '▼ show'}</span>
         </div>
         ${candidatesOpen ? `
@@ -232,6 +374,32 @@
         ` : ''}
       ` : ''}
 
+      <div class="divider"></div>
+      <div class="remaining-header" onclick="WP.toggleRemaining()">
+        <span class="remaining-label">Remaining Solutions</span>
+        <span class="remaining-badge">${badgeContent}</span>
+        <span class="remaining-toggle">${remainingOpen ? '▲ hide' : '▼ show'}</span>
+      </div>
+      ${remainingOpen ? `
+        <div style="margin-top:6px">
+          ${!wordsReady
+            ? '<p class="candidates-empty">Word list is loading&hellip;</p>'
+            : remainingLoading
+            ? '<p class="candidates-empty">Calculating&hellip;</p>'
+            : remainingWords === null
+            ? ''
+            : remainingWords.length === 0
+            ? '<p class="candidates-empty">No words match the current constraints.</p>'
+            : `<div class="word-list">
+                ${remainingWords.map(w => {
+                  const isSol = solutionSet.has(w);
+                  return `<span class="word-chip${isSol ? ' word-chip-solution' : ''}">${w.toUpperCase()}</span>`;
+                }).join('')}
+              </div>`
+          }
+        </div>
+      ` : ''}
+
       ${showModal ? `
         <div class="modal-overlay" onclick="WP.closeModal()">
           <div class="modal-sheet" onclick="event.stopPropagation()">
@@ -242,6 +410,22 @@
                 const used = usedLetters.includes(l);
                 return `<button class="letter-btn ${used ? 'letter-used' : 'letter-available'}"
                   ${used ? 'disabled' : `onclick="WP.addRow('${l}')"`}>${l}</button>`;
+              }).join('')}
+            </div>
+          </div>
+        </div>
+      ` : ''}
+
+      ${showGreyModal ? `
+        <div class="modal-overlay" onclick="WP.closeGreyModal()">
+          <div class="modal-sheet" onclick="event.stopPropagation()">
+            <div class="modal-handle"></div>
+            <p class="modal-title">Toggle grey letters</p>
+            <div class="letter-grid">
+              ${'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('').map(l => {
+                const isGrey = greyLetters.has(l);
+                return `<button class="letter-btn ${isGrey ? 'letter-grey-on' : 'letter-grey-off'}"
+                  onclick="WP.toggleGrey('${l}')">${l}</button>`;
               }).join('')}
             </div>
           </div>
@@ -260,6 +444,7 @@
         const inputs = document.querySelectorAll('#word-row input');
         if (i < 4) inputs[i+1].focus();
       }
+      scheduleFilter();
       render();
       if (v && i < 4) {
         const inputs = document.querySelectorAll('#word-row input');
@@ -269,6 +454,7 @@
     cellKey(e, i) {
       if (e.key === 'Backspace' && !word[i] && i > 0) {
         word[i-1] = '';
+        scheduleFilter();
         render();
         const inputs = document.querySelectorAll('#word-row input');
         inputs[i-1].focus();
@@ -276,25 +462,58 @@
     },
     toggle(id, pos) {
       const row = rows.find(r => r.id === id);
-      if (row) { row.active[pos] = !row.active[pos]; render(); }
+      if (row) { row.active[pos] = !row.active[pos]; scheduleFilter(); render(); }
     },
     deleteRow(id) {
       rows = rows.filter(r => r.id !== id);
+      scheduleFilter();
       render();
     },
     addRow(letter) {
       rows.push({ id: 'r' + Date.now(), letter, active: [true,true,true,true,true] });
       showModal = false;
+      scheduleFilter();
       render();
     },
+    toggleGrey(letter) {
+      if (greyLetters.has(letter)) greyLetters.delete(letter);
+      else greyLetters.add(letter);
+      scheduleFilter();
+      render();
+    },
+    openGreyModal() { showGreyModal = true; render(); },
+    closeGreyModal() { showGreyModal = false; render(); },
+    toggleRemaining() { remainingOpen = !remainingOpen; render(); },
     toggleCandidates() { candidatesOpen = !candidatesOpen; render(); },
     openModal() { showModal = true; render(); },
     closeModal() { showModal = false; render(); },
-    reset() { word = ['','','','','']; rows = []; candidatesOpen = false; showModal = false; render(); },
+    reset() {
+      word = ['','','','',''];
+      rows = [];
+      candidatesOpen = false;
+      showModal = false;
+      greyLetters = new Set();
+      showGreyModal = false;
+      remainingWords = null;
+      remainingLoading = false;
+      clearTimeout(debounceTimer);
+      render();
+    },
+    _onWordsLoaded() {
+      wordsReady = true;
+      // Compute immediately on load (no debounce — no user input triggered this)
+      remainingWords = computeRemaining();
+      remainingLoading = false;
+      render();
+    },
   };
+
+  // Handle race condition: words.js might load before or after this script
+  if (window._wordsLoaded) WP._onWordsLoaded();
 
   render();
 })();
 </script>
+<script src="words.js" async></script>
 </body>
 </html>
