@@ -38,7 +38,7 @@
 
   .word-row { display: flex; gap: 6px; }
   .cell {
-    width: 52px; height: 56px; border-radius: 6px;
+    flex: 1; min-width: 0; height: 56px; border-radius: 6px;
     display: flex; align-items: center; justify-content: center;
     transition: all 0.15s ease; position: relative;
   }
@@ -54,7 +54,7 @@
 
   .yellow-row { display: flex; align-items: center; gap: 8px; padding: 6px 0; }
   .yellow-cell {
-    width: 52px; height: 56px; border-radius: 6px;
+    flex: 1; min-width: 0; height: 56px; border-radius: 6px;
     display: flex; align-items: center; justify-content: center;
     font-size: 22px; font-weight: 700; cursor: pointer; user-select: none;
     transition: all 0.15s ease;
@@ -129,7 +129,7 @@
     display: flex; align-items: center; gap: 8px;
     cursor: pointer; user-select: none; padding: 4px 0;
   }
-  .remaining-label { font-size: 10px; text-transform: uppercase; letter-spacing: 2px; color: #538d4e; flex: 1; }
+  .remaining-label { font-size: 10px; text-transform: uppercase; letter-spacing: 2px; color: #85c0f9; flex: 1; }
   .remaining-badge {
     display: inline-flex; align-items: center; justify-content: center;
     background: #2a2a2b; border-radius: 10px; padding: 2px 8px;
@@ -242,6 +242,37 @@
     });
   }
 
+  // --- Letter frequency chart ---
+  function renderLetterChart(words) {
+    if (!words || words.length === 0) return '';
+
+    // Count letter frequency per position
+    const posFreq = Array.from({length: 5}, () => ({}));
+    for (const w of words) {
+      for (let i = 0; i < 5 && i < w.length; i++) {
+        const c = w[i];
+        posFreq[i][c] = (posFreq[i][c] || 0) + 1;
+      }
+    }
+    const posTop = posFreq.map(freq =>
+      Object.entries(freq).sort((a, b) => b[1] - a[1]).slice(0, 5)
+    );
+
+    const charts = posTop.map(top => {
+      const maxVal = top.length > 0 ? top[0][1] : 1;
+      const barRows = top.map(([letter, count]) => {
+        const pct = Math.round((count / maxVal) * 100);
+        return `<div style="display:flex;align-items:center;gap:2px;height:10px">
+          <span style="width:10px;flex-shrink:0;font-size:9px;font-family:monospace;font-weight:700;color:#e5e5e5;line-height:1">${letter.toUpperCase()}</span>
+          <div style="flex:1;height:100%"><div style="width:${pct}%;height:100%;background:#538d4e;opacity:0.7;border-radius:2px"></div></div>
+        </div>`;
+      }).join('');
+      return `<div style="flex:1;min-width:0;padding:5px 4px;display:flex;flex-direction:column;gap:3px;background:rgba(42,42,43,0.4);border:1px solid #2a2a2b;border-radius:3px;box-sizing:border-box">${barRows}</div>`;
+    }).join('');
+
+    return `<div style="display:flex;gap:6px;margin:10px 0 6px">${charts}</div>`;
+  }
+
   // --- Candidate generation ---
   function generateCandidates() {
     if (rows.length === 0) return [];
@@ -320,6 +351,7 @@
                 autocomplete="off" autocapitalize="characters" autocorrect="off" spellcheck="false">
             </div>
           `).join('')}
+          <div style="width:38px;flex-shrink:0"></div>
         </div>
       </div>
 
@@ -329,7 +361,7 @@
 
       ${rows.map(row => `
         <div class="yellow-row">
-          <div style="display:flex;gap:6px">
+          <div style="display:flex;gap:6px;flex:1">
             ${row.active.map((on, i) => `
               <div class="yellow-cell ${on ? 'yellow-on' : 'yellow-off'}"
                 onclick="WP.toggle('${row.id}',${i})">${row.letter}</div>
@@ -343,7 +375,7 @@
 
       ${greyLetters.size > 0 ? `
         <div class="grey-chips">
-          ${[...greyLetters].sort().map(l => `
+          ${[...greyLetters].map(l => `
             <div class="grey-chip" onclick="WP.toggleGrey('${l}')" title="Remove ${l}">${l} &times;</div>
           `).join('')}
         </div>
@@ -390,7 +422,7 @@
             ? ''
             : remainingWords.length === 0
             ? '<p class="candidates-empty">No words match the current constraints.</p>'
-            : `<div class="word-list">
+            : `${renderLetterChart(remainingWords)}<div class="word-list">
                 ${remainingWords.map(w => {
                   const isSol = solutionSet.has(w);
                   return `<span class="word-chip${isSol ? ' word-chip-solution' : ''}">${w.toUpperCase()}</span>`;
